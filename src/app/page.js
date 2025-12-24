@@ -2,25 +2,86 @@
 
 import { useEffect, useRef, useState } from "react";
 import Toolbar from "@/components/Toolbar";
+import { loadGoogleFonts, FONT_FAMILIES } from "@/components/Font";
+
+/* ================= SIZE PRESETS ================= */
+const SIZE_MAP = {
+  "2x3": { w: 600, h: 900 },
+  "3x2": { w: 900, h: 600 },
+  "3x5": { w: 900, h: 1500 },
+  "5x3": { w: 1500, h: 900 },
+  "3x4": { w: 900, h: 1200 },
+  "4x3": { w: 1200, h: 900 },
+  "3x6": { w: 900, h: 1800 },
+  "6x3": { w: 1800, h: 900 },
+  "4x6": { w: 1200, h: 1800 },
+  "6x4": { w: 1800, h: 1200 },
+  "4x8": { w: 1200, h: 2400 },
+  "8x4": { w: 2400, h: 1200 },
+  "4x10": { w: 1200, h: 3000 },
+  "6x8": { w: 1800, h: 2400 },
+  "6x10": { w: 1800, h: 3000 },
+};
+
+/* ================= AUTO FIT ================= */
+const autoFitTextInsideSafety = (text, canvas) => {
+  if (!text || !canvas?.safetyRect) return;
+
+  const safety = canvas.safetyRect.getBoundingRect(true);
+
+  if (!text.baseFontSize) {
+    text.baseFontSize = text.fontSize;
+  }
+
+  text.setCoords();
+  let bounds = text.getBoundingRect(true);
+  let fontSize = text.fontSize;
+
+  if (bounds.width > safety.width || bounds.height > safety.height) {
+    text.set({ fontSize: Math.max(fontSize - 1, 6) });
+    text.setCoords();
+  } else if (fontSize < text.baseFontSize) {
+    text.set({ fontSize: fontSize + 1 });
+    const test = text.getBoundingRect(true);
+    if (test.width > safety.width || test.height > safety.height) {
+      text.set({ fontSize });
+    }
+  }
+
+  bounds = text.getBoundingRect(true);
+
+  if (bounds.left < safety.left) text.left += safety.left - bounds.left;
+  if (bounds.top < safety.top) text.top += safety.top - bounds.top;
+  if (bounds.left + bounds.width > safety.left + safety.width)
+    text.left -= bounds.left + bounds.width - (safety.left + safety.width);
+  if (bounds.top + bounds.height > safety.top + safety.height)
+    text.top -= bounds.top + bounds.height - (safety.top + safety.height);
+
+  text.setCoords();
+};
 
 export default function Page() {
   const canvasElRef = useRef(null);
   const fabricRef = useRef(null);
   const [ready, setReady] = useState(false);
 
+  /* LOAD FONTS */
   useEffect(() => {
-    if (!window.fabric) return;
-    if (!canvasElRef.current) return;
-    if (fabricRef.current) return;
+    loadGoogleFonts(FONT_FAMILIES);
+  }, []);
 
-    const FINAL_W = 900;
-    const FINAL_H = 500;
+  /* INIT CANVAS */
+  useEffect(() => {
+    if (!window.fabric || !canvasElRef.current || fabricRef.current) return;
+
+    const INIT_W = 900;
+    const INIT_H = 500;
     const BLEED = 20;
     const SAFETY = 40;
 
     const canvas = new window.fabric.Canvas(canvasElRef.current, {
-      width: FINAL_W + BLEED * 2,
-      height: FINAL_H + BLEED * 2,
+      width: INIT_W + BLEED * 2,
+      height: INIT_H + BLEED * 2,
       backgroundColor: "#f5f5f5",
       preserveObjectStacking: true,
     });
@@ -28,239 +89,100 @@ export default function Page() {
     fabricRef.current = canvas;
     setReady(true);
 
-    /* -------- Artboard -------- */
     const artboard = new window.fabric.Rect({
       left: BLEED,
       top: BLEED,
-      width: FINAL_W,
-      height: FINAL_H,
+      width: INIT_W,
+      height: INIT_H,
       fill: "#fff",
       selectable: false,
       evented: false,
     });
+    artboard.name = "artboard";
 
-    /* -------- Bleed -------- */
     const bleed = new window.fabric.Rect({
       left: BLEED,
       top: BLEED,
-      width: FINAL_W,
-      height: FINAL_H,
+      width: INIT_W,
+      height: INIT_H,
       fill: "transparent",
       stroke: "#7b61ff",
       strokeDashArray: [4, 4],
       selectable: false,
       evented: false,
     });
+    bleed.name = "bleed";
 
-    /* -------- Safety -------- */
     const safety = new window.fabric.Rect({
       left: BLEED + SAFETY,
       top: BLEED + SAFETY,
-      width: FINAL_W - SAFETY * 2,
-      height: FINAL_H - SAFETY * 2,
+      width: INIT_W - SAFETY * 2,
+      height: INIT_H - SAFETY * 2,
       fill: "transparent",
       stroke: "red",
       strokeDashArray: [6, 4],
       selectable: false,
       evented: false,
     });
+    safety.name = "safety";
 
     canvas.add(artboard, bleed, safety);
     canvas.sendToBack(artboard);
-
-    // 🔑 attach safety to canvas (IMPORTANT)
     canvas.safetyRect = safety;
 
-    /* =====================================================
-       🔒 KEEP TEXT INSIDE SAFETY (MOVE / SCALE / TYPE)
-    ===================================================== */
-
-    const keepTextInsideSafety = (text) => {
-      if (!text || !canvas.safetyRect) return;
-
-      text.setCoords();
-
-      const textBounds = text.getBoundingRect(true);
-      const safetyBounds = canvas.safetyRect.getBoundingRect(true);
-
-      let fontSize = text.fontSize;
-
-      // 1️⃣ shrink text if larger than safety
-      while (
-        (textBounds.width > safetyBounds.width ||
-          textBounds.height > safetyBounds.height) &&
-        fontSize > 6
-      ) {
-        fontSize -= 1;
-        text.set({ fontSize });
-        text.setCoords();
+    canvas.on("text:changed", e => {
+      if (e.target?.type === "i-text") {
+        autoFitTextInsideSafety(e.target, canvas);
+        canvas.requestRenderAll();
       }
-
-      const updatedBounds = text.getBoundingRect(true);
-
-      // LEFT
-      if (updatedBounds.left < safetyBounds.left) {
-        text.left += safetyBounds.left - updatedBounds.left;
-      }
-
-      // TOP
-      if (updatedBounds.top < safetyBounds.top) {
-        text.top += safetyBounds.top - updatedBounds.top;
-      }
-
-      // RIGHT
-      if (
-        updatedBounds.left + updatedBounds.width >
-        safetyBounds.left + safetyBounds.width
-      ) {
-        text.left -=
-          updatedBounds.left +
-          updatedBounds.width -
-          (safetyBounds.left + safetyBounds.width);
-      }
-
-      // BOTTOM
-      if (
-        updatedBounds.top + updatedBounds.height >
-        safetyBounds.top + safetyBounds.height
-      ) {
-        text.top -=
-          updatedBounds.top +
-          updatedBounds.height -
-          (safetyBounds.top + safetyBounds.height);
-      }
-
-      text.setCoords();
-    };
-
-    const autoFitTextInsideSafety = (text) => {
-  if (!text || !canvas.safetyRect) return;
-
-  const safetyBounds = canvas.safetyRect.getBoundingRect(true);
-
-  // 🔑 remember original size
-  if (!text.baseFontSize) {
-    text.baseFontSize = text.fontSize;
-  }
-
-  let fontSize = text.fontSize;
-
-  text.setCoords();
-  let bounds = text.getBoundingRect(true);
-
-  /* ---------------- SHRINK (SOFT) ---------------- */
-  if (
-    bounds.width > safetyBounds.width ||
-    bounds.height > safetyBounds.height
-  ) {
-    text.set({
-      fontSize: Math.max(fontSize - 1, 6), // 🔥 only -1 per event
-    });
-    text.setCoords();
-  }
-
-  /* ---------------- GROW BACK (SOFT) ---------------- */
-  else if (fontSize < text.baseFontSize) {
-    text.set({
-      fontSize: fontSize + 1, // 🔥 only +1 per event
-    });
-    text.setCoords();
-
-    const testBounds = text.getBoundingRect(true);
-
-    // agar grow karne se overflow ho jaye → revert
-    if (
-      testBounds.width > safetyBounds.width ||
-      testBounds.height > safetyBounds.height
-    ) {
-      text.set({ fontSize });
-      text.setCoords();
-    }
-  }
-
-  /* ---------------- POSITION CLAMP ---------------- */
-  bounds = text.getBoundingRect(true);
-
-  if (bounds.left < safetyBounds.left) {
-    text.left += safetyBounds.left - bounds.left;
-  }
-
-  if (bounds.top < safetyBounds.top) {
-    text.top += safetyBounds.top - bounds.top;
-  }
-
-  if (
-    bounds.left + bounds.width >
-    safetyBounds.left + safetyBounds.width
-  ) {
-    text.left -=
-      bounds.left +
-      bounds.width -
-      (safetyBounds.left + safetyBounds.width);
-  }
-
-  if (
-    bounds.top + bounds.height >
-    safetyBounds.top + safetyBounds.height
-  ) {
-    text.top -=
-      bounds.top +
-      bounds.height -
-      (safetyBounds.top + safetyBounds.height);
-  }
-
-  text.setCoords();
-};
-
-    /* -------- MOVE -------- */
-canvas.on("text:changed", (e) => {
-  const obj = e.target;
-  if (!obj || obj.type !== "i-text") return;
-
-  autoFitTextInsideSafety(obj);
-  canvas.requestRenderAll();
-});
-
-canvas.on("object:moving", (e) => {
-  if (e.target?.type === "i-text") {
-    autoFitTextInsideSafety(e.target);
-  }
-});
-
-canvas.on("object:scaling", (e) => {
-  const obj = e.target;
-  if (!obj || obj.type !== "i-text") return;
-
-  obj.scaleX = obj.scaleY;
-  autoFitTextInsideSafety(obj);
-});
-
-    /* -------- TYPING (MAIN FIX) -------- */
-    canvas.on("text:changed", (e) => {
-      console.log("🚀 ~ Page ~ e:", e)
-      const obj = e.target;
-      if (!obj || obj.type !== "i-text") return;
-
-      keepTextInsideSafety(obj);
-      canvas.requestRenderAll();
     });
 
-    return () => {
-      canvas.dispose();
-      fabricRef.current = null;
-    };
+    return () => canvas.dispose();
   }, []);
+
+  const changeCanvasSize = sizeKey => {
+    const canvas = fabricRef.current;
+    if (!canvas || !SIZE_MAP[sizeKey]) return;
+
+    const { w, h } = SIZE_MAP[sizeKey];
+    const BLEED = 20;
+    const SAFETY = 40;
+
+    const artboard = canvas.getObjects().find(o => o.name === "artboard");
+    const bleed = canvas.getObjects().find(o => o.name === "bleed");
+    const safety = canvas.getObjects().find(o => o.name === "safety");
+
+    const oldSafety = safety.getBoundingRect(true);
+
+    canvas.setWidth(w + BLEED * 2);
+    canvas.setHeight(h + BLEED * 2);
+
+    artboard.set({ left: BLEED, top: BLEED, width: w, height: h });
+    bleed.set({ left: BLEED, top: BLEED, width: w, height: h });
+    safety.set({
+      left: BLEED + SAFETY,
+      top: BLEED + SAFETY,
+      width: w - SAFETY * 2,
+      height: h - SAFETY * 2,
+    });
+
+    canvas.safetyRect = safety;
+    canvas.requestRenderAll();
+  };
 
   return (
     <>
-      <canvas
-        ref={canvasElRef}
-        width={940}
-        height={540}
-        style={{ border: "1px solid #ccc" }}
-        />
-        {ready && <Toolbar canvasRef={fabricRef} />}
+      <select onChange={e => changeCanvasSize(e.target.value)} defaultValue="4x6">
+        {Object.keys(SIZE_MAP).map(s => (
+          <option key={s} value={s}>
+            {s}
+          </option>
+        ))}
+      </select>
 
+      <canvas ref={canvasElRef} width={940} height={540} />
+
+      {ready && <Toolbar canvasRef={fabricRef} />}
     </>
   );
 }
