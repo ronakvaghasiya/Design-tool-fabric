@@ -6,8 +6,12 @@ import { FONT_FAMILIES } from "./Font";
 
 export default function Toolbar({ canvasRef }) {
   const [activeText, setActiveText] = useState(null);
-  const [showColorPicker, setShowColorPicker] = useState(false);
-  const pickerRef = useRef(null);
+
+  const [showTextColorPicker, setShowTextColorPicker] = useState(false);
+  const [showCanvasBgPicker, setShowCanvasBgPicker] = useState(false);
+
+  const textPickerRef = useRef(null);
+  const canvasPickerRef = useRef(null);
 
   /* ================= HELPERS ================= */
   const getCanvas = () => {
@@ -25,7 +29,13 @@ export default function Toolbar({ canvasRef }) {
     setActiveText({ ...obj });
   };
 
-  /* ================= SELECTION TRACK ================= */
+  const getArtboard = () => {
+    const canvas = getCanvas();
+    if (!canvas) return null;
+    return canvas.getObjects().find(o => o.name === "artboard");
+  };
+
+  /* ================= SELECTION ================= */
   useEffect(() => {
     const canvas = getCanvas();
     if (!canvas) return;
@@ -33,12 +43,12 @@ export default function Toolbar({ canvasRef }) {
     const onSelect = e => {
       const obj = e?.selected?.[0];
       setActiveText(obj?.type === "i-text" ? { ...obj } : null);
-      setShowColorPicker(false);
+      setShowTextColorPicker(false);
     };
 
     const onClear = () => {
       setActiveText(null);
-      setShowColorPicker(false);
+      setShowTextColorPicker(false);
     };
 
     canvas.on("selection:created", onSelect);
@@ -52,21 +62,29 @@ export default function Toolbar({ canvasRef }) {
     };
   }, []);
 
-  /* ================= CLICK OUTSIDE (COLOR PICKER) ================= */
+  /* ================= CLICK OUTSIDE ================= */
   useEffect(() => {
     const handleClick = e => {
       if (
-        pickerRef.current &&
-        !pickerRef.current.contains(e.target)
+        textPickerRef.current &&
+        !textPickerRef.current.contains(e.target)
       ) {
-        setShowColorPicker(false);
+        setShowTextColorPicker(false);
+      }
+
+      if (
+        canvasPickerRef.current &&
+        !canvasPickerRef.current.contains(e.target)
+      ) {
+        setShowCanvasBgPicker(false);
       }
     };
+
     document.addEventListener("mousedown", handleClick);
     return () => document.removeEventListener("mousedown", handleClick);
   }, []);
 
-  /* ================= BASIC ACTIONS ================= */
+  /* ================= BASIC ================= */
   const addText = () => {
     const canvas = getCanvas();
     if (!canvas) return;
@@ -81,12 +99,7 @@ export default function Toolbar({ canvasRef }) {
       lockScalingFlip: true,
     });
 
-    text.setControlsVisibility({
-      mt: false,
-      mb: false,
-      ml: false,
-      mr: false,
-    });
+    text.setControlsVisibility({ mt: false, mb: false, ml: false, mr: false });
 
     canvas.add(text);
     canvas.setActiveObject(text);
@@ -119,52 +132,59 @@ export default function Toolbar({ canvasRef }) {
     sync(obj);
   };
 
-  /* ================= COLOR ================= */
-  const changeColor = color => {
+  /* ================= TEXT COLOR ================= */
+  const changeTextColor = color => {
     updateText({ fill: color });
+  };
+
+  /* ================= CANVAS / ARTBOARD BG ================= */
+  const changeCanvasBackground = color => {
+    const canvas = getCanvas();
+    const artboard = getArtboard();
+    if (!canvas || !artboard) return;
+
+    artboard.set("fill", color);
+    canvas.requestRenderAll();
+  };
+
+  const resetCanvasBackground = () => {
+    const canvas = getCanvas();
+    const artboard = getArtboard();
+    if (!canvas || !artboard) return;
+
+    artboard.set("fill", "#ffffff");
+    canvas.requestRenderAll();
   };
 
   /* ================= COPY / DELETE ================= */
   const copy = () => {
     const canvas = getCanvas();
     const obj = getActive();
+
     if (!canvas || !obj) return;
 
     obj.clone(clone => {
-      clone.set({ left: obj.left + 20, top: obj.top + 20 });
+      clone.set({
+        left: obj.left + 20,
+        top: obj.top + 20,
+      });
+
+      clone.setCoords();
       canvas.add(clone);
       canvas.setActiveObject(clone);
+
+      clone.setControlsVisibility({
+        mt: false,
+        mb: false,
+        ml: false,
+        mr: false,
+      });
+
       canvas.requestRenderAll();
       sync(clone);
     });
   };
 
-  const remove = () => {
-    const canvas = getCanvas();
-    const obj = getActive();
-    if (!canvas || !obj) return;
-
-    canvas.remove(obj);
-    canvas.requestRenderAll();
-    setActiveText(null);
-  };
-
-  /* ================= LAYER ================= */
-  const bringFront = () => {
-    const canvas = getCanvas();
-    const obj = getActive();
-    if (!canvas || !obj) return;
-    canvas.bringToFront(obj);
-    canvas.requestRenderAll();
-  };
-
-  const sendBack = () => {
-    const canvas = getCanvas();
-    const obj = getActive();
-    if (!canvas || !obj) return;
-    canvas.sendToBack(obj);
-    canvas.requestRenderAll();
-  };
 
   /* ================= UI ================= */
   return (
@@ -181,9 +201,44 @@ export default function Toolbar({ canvasRef }) {
         position: "relative",
       }}
     >
+      {/* BASIC */}
       <button onClick={addText}>Text</button>
       <button onClick={clearCanvas}>Clear</button>
 
+      {/* 🖼 CANVAS BACKGROUND */}
+      <button onClick={() => setShowCanvasBgPicker(v => !v)}>
+        Canvas BG
+      </button>
+
+      {showCanvasBgPicker && (
+        <div
+          ref={canvasPickerRef}
+          style={{
+            position: "absolute",
+            top: 45,
+            right: 10,
+            zIndex: 1000,
+            background: "#fff",
+            padding: 10,
+            border: "1px solid #ddd",
+            borderRadius: 6,
+            boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
+          }}
+        >
+          <HexColorPicker
+            color={getArtboard()?.fill || "#ffffff"}
+            onChange={changeCanvasBackground}
+          />
+          <button
+            style={{ marginTop: 8, width: "100%" }}
+            onClick={resetCanvasBackground}
+          >
+            Reset BG
+          </button>
+        </div>
+      )}
+
+      {/* ================= TEXT CONTROLS ================= */}
       {activeText && (
         <>
           {/* FONT FAMILY */}
@@ -201,24 +256,24 @@ export default function Toolbar({ canvasRef }) {
             value={activeText.fontSize ?? 32}
             onChange={e => updateText({ fontSize: +e.target.value })}
           >
-            {[12,16,20,24,32,40,48,64].map(s => (
+            {[12, 16, 20, 24, 32, 40, 48, 64].map(s => (
               <option key={s} value={s}>{s}</option>
             ))}
           </select>
 
-          {/* 🎨 COLOR */}
-          <button onClick={() => setShowColorPicker(v => !v)}>
-            🎨 Color
+          {/* 🎨 TEXT COLOR */}
+          <button onClick={() => setShowTextColorPicker(v => !v)}>
+            Text Color
           </button>
 
-          {showColorPicker && (
+          {showTextColorPicker && (
             <div
-              ref={pickerRef}
+              ref={textPickerRef}
               style={{
                 position: "absolute",
-                top: 50,
+                top: 45,
                 left: 10,
-                zIndex: 999,
+                zIndex: 1000,
                 background: "#fff",
                 padding: 10,
                 border: "1px solid #ddd",
@@ -228,7 +283,7 @@ export default function Toolbar({ canvasRef }) {
             >
               <HexColorPicker
                 color={activeText.fill || "#000000"}
-                onChange={changeColor}
+                onChange={changeTextColor}
               />
             </div>
           )}
@@ -307,11 +362,8 @@ export default function Toolbar({ canvasRef }) {
 
           {/* COPY / DELETE */}
           <button onClick={copy}>Copy</button>
-          <button onClick={remove}>Delete</button>
+          <button onClick={clearCanvas}>Delete</button>
 
-          {/* LAYER */}
-          <button onClick={bringFront}>Front</button>
-          <button onClick={sendBack}>Back</button>
         </>
       )}
     </div>
